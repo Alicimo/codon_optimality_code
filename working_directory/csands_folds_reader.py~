@@ -170,7 +170,7 @@ def filter_min_family(data,minimum,excluded_folds):
 		if any([fold in folds for fold in datum.protein_domain_fold]):
 			filtered.append(datum)
 
-	return filtered,folds,fold_count_filt
+	return filtered,folds,fold_count
 
 #filter an array of CSandS data for a specific fold
 def filter_fold(data,fold):

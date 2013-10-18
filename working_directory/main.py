@@ -20,10 +20,10 @@ rframe_file = 'csands_folds_xray_90.txt'
 databases = '/local/databases/'
 
 #excluded species
-excluded_file = 'excluded_species_tRNA_40.csv'
+excluded_species = 'excluded_species_tRNA_40.csv'
 
 #excluded folds
-excluded_file = 'excluded_folds_40_min_7.csv'
+excluded_folds = 'excluded_folds_40_min_7.csv'
 
 #window size to use for smoothing
 window_size = 3
@@ -48,11 +48,11 @@ print "Window size:", window_size
 print "Minimum group size:",min_group
 print "Alignment switch:",alignment_switch
 print "High cut threshold:",high_thresh
-print "Low cut threshold:",low_thresh
+print "Low cut threshold:",low_thresh,'\n'
 
 home = os.path.expanduser("~")
 databases = home + databases
-input_file = databases + input_file
+csands_file = databases + csands_file
 excluded_species = databases + excluded_species
 excluded_folds = databases + excluded_folds
 rframe_file = databases + rframe_file
@@ -81,9 +81,11 @@ print "Fold types:",len(folds),'\n'
 ######################################################
 
 organisms = [datum.organism for datum in data]
-for org in organism:
+print '\nTypes of organisms:',len(organisms),'\n'
+
+for org in organisms:
 	speed_scores[org] = get_tAI.get_tAI(datum.organism,databases)
-speed_low,speed_high = get_optimality_thresholds(organisms,speed_scores,window_size,low_thresh,high_thresh,rframe_file)
+speed_low,speed_high = scoring.get_optimality_thresholds(organisms,speed_scores,window_size,low_thresh,high_thresh,rframe_file)
 
 ######################################################
 #MAIN LOOP
@@ -93,104 +95,33 @@ for iteration,fold in enumerate(folds):
 
 	print fold,':\t',iteration+1,"\tout of\t",len(folds)
 
-	fold_data = csands_folds_reader.filter_fold(data,fold)		
+	#extract specific fold data
+	fold_data = csands_folds_reader.filter_fold(data,fold)	
 
-######################################################
-#STRUCTURAL ALIGNMENT
-######################################################
-
-	alignmnets,protein_seq,flag = MAMMOTHmult.structural_alignment(fold_data,fold,databases)
+	#structural alignment
+	alignments,protein_seq,flag = MAMMOTHmult.structural_alignment(fold_data,fold,databases)
 	if flag:
 		continue
 
-	
+	#mRNA
+	rna_seq = mRNA.get_mRNA(fold_data,speed_scores)
+	aligned_rna = mRNA.align_mRNA(protein_seq,rna_seq)
 
-
-
-######################################################
-#GET RNA SEGMENTS
-######################################################
-
-	rna_seq = []
+	#organisms
+	organisms = []
 	for datum in fold_data:
-
-		#get rna for segment that was crystalised
-		seg_start = int(datum.rna_aligned_start) - (int(datum.protein_aligned_start)-1)*3 - 1
-		seg_end = seg_start + len(datum.protein_sequence)*3
-		rna = datum.rna_sequence[seg_start:seg_end]
-
-		for i,amino_acid in enumerate(datum.protein_sequence):
-
-			#remove codons which have non-standard nucleotides
-			if not rna[i*3:(i+1)*3] in speed_scores[datum.organism].keys():
-				rna = rna[:i*3]+'---'+rna[(i+1)*3:]	
-		
-		#extract fold segments
-		for i,pfold in enumerate(datum.protein_domain_fold):
-
+		for pfold in datum.protein_domain_fold:
 			if pfold == fold:
-
-				seg = datum.protein_domain_residue[i].split(':')[0] # only use first part of fold
-				res_seg = map(int,re.findall('\d+', seg))
-				if seg[0] == '-': #begins in a negative region
-					res_seg[0] *= -1
-
-				rna_start = (res_seg[0]-int(datum.protein_start))*3
-				rna_end =  (res_seg[1]-int(datum.protein_start) + 1 )*3
-				rna_seq.append(rna[rna_start:rna_end])
-
-######################################################
-#ALLIGN RNA SEGMENTS
-######################################################
-
-	aligned_rna = []
-	for i,seq in enumerate(protein_seq):
-
-		count = 0
-		alignment = ''
-		for j,aa in enumerate(seq):
-
-			#skip codons of amino acids not present in crystal structure
-			if aa == '-':
-				continue
+				organisms.append(datum.organism)
 		
-			#iterate until you find the next amino acid in alignment
-			while alignments[i][count] == '-':
-				alignment += '---'
-				count += 1
-		
-			#sanity check
-			if alignments[i][count] != aa:
-				print "Error: Mismatch when assigning RNA alignment"
-				print fnames[i]
-				print sum([1 for a in alignments[i] if a != '-'])
-				sys.exit()
-
-			alignment += rna_seq[i][j*3:(j+1)*3]
-			count += 1
-		
-		alignment += (len(alignments[0])-len(alignment)/3) * '---'
-		aligned_rna.append(alignment)
-		
-#######################################################
-#CALCULATE SPEED PROFILE
-#######################################################
-
-	speed_profiles = []
-	for rna_seq,org in zip(aligned_rna,organisms): 
-		speed_profile = []
-		for i in xrange(len(rna_seq)/3):
-			codon = rna_seq[i*3:(i+1)*3]
-			speed_profile.append(speed_scores[org][codon])
-
-		speed_profiles.append( smoothAll(speed_profile,window_size))
+	#speed profiling
+	speed_profiles = score_rna_multiple(aligned_rnas,organisms,scores)
 
 
 ########################################################
 #Analysis
 ########################################################
 
-	
 
 	codon_classes = []	
 	for speed,org in zip(speed_profiles,organisms):
